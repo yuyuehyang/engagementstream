@@ -218,7 +218,7 @@ const LINE_LABELS = ['T1', 'T2', 'T3'];
 
 // ★ 每次新增日期只要在這裡加一行 ★
 const DATE_GROUPS = {
-  '1119': ['group3', 'group6'.'all'],
+  '1119': ['group3', 'group6', 'all'],
   '1211': ['group5', 'group6','all'],
 };
 // ────────────────────────────────────────────────────────────
@@ -297,7 +297,7 @@ function redraw() {
 
   const chartLeft  = canvas.width  * CHART_LEFT_RATIO;
   const chartRight = canvas.width  * CHART_RIGHT_RATIO;
-  const top    = canvas.height * 0.04;
+  const top    = canvas.height * 0.06;
   const bottom = canvas.height * 0.82;
 
   lineRatios.forEach((r, i) => {
