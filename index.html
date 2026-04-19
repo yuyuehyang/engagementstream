@@ -151,14 +151,12 @@
     </div>
   </div>
 
-  <!-- Group selector -->
+  <!-- Date + Group selector -->
   <div id="group-bar">
-    <label>選擇組別：</label>
-    <select id="group-select" onchange="onGroupChange()">
-      <option value="group3">GROUP3</option>
-      <option value="group6">GROUP6</option>
-      <option value="all">ALL</option>
-    </select>
+    <label>選擇日期：</label>
+    <select id="date-select" onchange="onDateChange()"></select>
+    <label style="margin-left:12px;">選擇組別：</label>
+    <select id="group-select" onchange="onGroupChange()"></select>
   </div>
 
   <!-- Group chart + overlay -->
@@ -224,32 +222,56 @@ const DATE_GROUPS = {
 // ────────────────────────────────────────────────────────────
 
 const params   = new URLSearchParams(window.location.search);
-const date     = params.get('date') || '';
+const urlDate  = params.get('date') || '';
 const urlGroup = (params.get('group') || '').toLowerCase();
 
-document.getElementById('lbl-date').textContent = date || '未知';
+const dateSel  = document.getElementById('date-select');
+const groupSel = document.getElementById('group-select');
 
-// 根據日期動態產生下拉選單
-const sel    = document.getElementById('group-select');
-const groups = DATE_GROUPS[date] || ['all'];
-sel.innerHTML = groups.map(g =>
-  `<option value="${g}">${g.toUpperCase()}</option>`
+// 產生日期下拉
+const allDates = Object.keys(DATE_GROUPS);
+dateSel.innerHTML = allDates.map(d =>
+  `<option value="${d}">${d}</option>`
 ).join('');
+dateSel.value = allDates.includes(urlDate) ? urlDate : allDates[0];
 
-const initGroup = groups.includes(urlGroup) ? urlGroup : groups[0];
-sel.value = initGroup;
-document.getElementById('lbl-group').textContent = initGroup.toUpperCase();
+function currentDate()  { return dateSel.value; }
+function currentGroup() { return groupSel.value; }
 
-function loadImages(group) {
-  document.getElementById('img-group').src   = `${IMG_BASE}${date}_${group}.png`;
-  document.getElementById('img-summary').src = `${IMG_BASE}${date}_summary_comparison.png`;
+function updateGroupOptions() {
+  const groups = DATE_GROUPS[currentDate()] || ['all'];
+  groupSel.innerHTML = groups.map(g =>
+    `<option value="${g}">${g.toUpperCase()}</option>`
+  ).join('');
+  groupSel.value = groups.includes(urlGroup) ? urlGroup : groups[0];
+  document.getElementById('lbl-group').textContent = currentGroup().toUpperCase();
 }
-loadImages(initGroup);
+
+function updateHeader() {
+  document.getElementById('lbl-date').textContent  = currentDate();
+  document.getElementById('lbl-group').textContent = currentGroup().toUpperCase();
+}
+
+function loadImages() {
+  document.getElementById('img-group').src   = `${IMG_BASE}${currentDate()}_${currentGroup()}.png`;
+  document.getElementById('img-summary').src = `${IMG_BASE}${currentDate()}_summary_comparison.png`;
+}
+
+function onDateChange() {
+  updateGroupOptions();
+  updateHeader();
+  loadImages();
+}
 
 function onGroupChange() {
-  document.getElementById('lbl-group').textContent = sel.value.toUpperCase();
-  loadImages(sel.value);
+  updateHeader();
+  loadImages();
 }
+
+// 初始化
+updateGroupOptions();
+updateHeader();
+loadImages();
 
 // ── Canvas overlay ───────────────────────────────────────────
 const canvas  = document.getElementById('overlay');
@@ -372,7 +394,7 @@ async function handleSave() {
     const screenshot = c.toDataURL('image/png').split(',')[1];
 
     const payload = {
-      date, group: sel.value,
+      date: currentDate(), group: currentGroup(),
       timepoints: lineRatios.map(ratioToMinutes),
       screenshot,
       timestamp: new Date().toISOString()
