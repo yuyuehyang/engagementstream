@@ -155,7 +155,6 @@
   <div id="group-bar">
     <label>選擇組別：</label>
     <select id="group-select" onchange="onGroupChange()">
-      <option value="group1">GROUP1</option>
       <option value="group3">GROUP3</option>
       <option value="group6">GROUP6</option>
       <option value="all">ALL</option>
@@ -216,20 +215,30 @@ const CHART_RIGHT_RATIO = 0.987;  // ~98.7%
 // 三條標記線的顏色
 const LINE_COLORS = ['#e65100', '#1565c0', '#b71c1c'];
 const LINE_LABELS = ['T1', 'T2', 'T3'];
+
+// ★ 每次新增日期只要在這裡加一行 ★
+const DATE_GROUPS = {
+  '1119': ['group3', 'group6'.'all'],
+  '1211': ['group5', 'group6','all'],
+};
 // ────────────────────────────────────────────────────────────
 
-const params = new URLSearchParams(window.location.search);
-const date   = params.get('date')  || '';
-const initGroup = (params.get('group') || 'group1').toLowerCase();
+const params   = new URLSearchParams(window.location.search);
+const date     = params.get('date') || '';
+const urlGroup = (params.get('group') || '').toLowerCase();
 
-document.getElementById('lbl-date').textContent  = date  || '未知';
-document.getElementById('lbl-group').textContent = (params.get('group') || '未知').toUpperCase();
+document.getElementById('lbl-date').textContent = date || '未知';
 
-// Set dropdown to URL group
-const sel = document.getElementById('group-select');
-for (let opt of sel.options) {
-  if (opt.value === initGroup) { opt.selected = true; break; }
-}
+// 根據日期動態產生下拉選單
+const sel    = document.getElementById('group-select');
+const groups = DATE_GROUPS[date] || ['all'];
+sel.innerHTML = groups.map(g =>
+  `<option value="${g}">${g.toUpperCase()}</option>`
+).join('');
+
+const initGroup = groups.includes(urlGroup) ? urlGroup : groups[0];
+sel.value = initGroup;
+document.getElementById('lbl-group').textContent = initGroup.toUpperCase();
 
 function loadImages(group) {
   document.getElementById('img-group').src   = `${IMG_BASE}${date}_${group}.png`;
@@ -238,6 +247,7 @@ function loadImages(group) {
 loadImages(initGroup);
 
 function onGroupChange() {
+  document.getElementById('lbl-group').textContent = sel.value.toUpperCase();
   loadImages(sel.value);
 }
 
