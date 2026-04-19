@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>課堂專注度標註</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f0f0; padding: 20px; }
+
+    #page-wrapper {
+      max-width: 1100px;
+      margin: 0 auto;
+      background: #fff;
+      border-radius: 8px;
+      padding: 20px 24px 24px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+    }
+
+    /* Header */
+    #header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 2px solid #e0e0e0;
+    }
+    #header h2 { font-size: 17px; color: #333; }
+    #info-bar { display: flex; gap: 16px; font-size: 13px; color: #666; }
+    #info-bar span strong { color: #333; }
+
+
+    /* Group selector */
+    #group-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    #group-bar label { font-size: 13px; color: #555; }
+    #group-select {
+      padding: 5px 10px;
+      font-size: 14px;
+      border: 1px solid #bbb;
+      border-radius: 4px;
+      background: #fff;
+      cursor: pointer;
+    }
+
+    /* Chart overlay container */
+    .chart-wrap {
+      position: relative;
+      display: block;
+      width: 100%;
+      margin-bottom: 12px;
+      cursor: ew-resize;
+      user-select: none;
+    }
+    .chart-wrap img {
+      width: 100%;
+      display: block;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    #overlay {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none; /* canvas draws only; mouse handled by wrapper */
+    }
+
+    /* Summary image */
+    #img-summary {
+      width: 100%;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      margin-bottom: 16px;
+    }
+
+    /* Time points display (like concept image) */
+    #timepoints-section {
+      margin-bottom: 16px;
+    }
+    .tp-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .tp-label {
+      width: 68px;
+      font-size: 13px;
+      color: #444;
+      flex-shrink: 0;
+    }
+    .tp-bar-wrap {
+      flex: 1;
+      height: 22px;
+      background: #e8e8e8;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .tp-bar {
+      height: 100%;
+      background: #4caf50;
+      border-radius: 4px;
+      transition: width 0.15s;
+    }
+    .tp-time {
+      width: 68px;
+      text-align: right;
+      font-size: 13px;
+      font-weight: bold;
+      color: #333;
+      flex-shrink: 0;
+    }
+
+    /* Save */
+    #save-btn {
+      display: block;
+      width: 100%;
+      padding: 11px;
+      background: #1a73e8;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 15px;
+      cursor: pointer;
+    }
+    #save-btn:hover { background: #1558b0; }
+    #save-btn:disabled { background: #aaa; cursor: not-allowed; }
+    #status { margin-top: 8px; font-size: 13px; text-align: center; min-height: 18px; color: #555; }
+    #status.ok { color: #2e7d32; }
+    #status.err { color: #c62828; }
+
+    /* Instruction hint */
+    .hint { font-size: 12px; color: #888; margin-bottom: 6px; }
+  </style>
+</head>
+<body>
+<div id="page-wrapper">
+
+  <!-- Header -->
+  <div id="header">
+    <h2>課堂專注度標註系統</h2>
+    <div id="info-bar">
+      <span>日期：<strong id="lbl-date">—</strong></span>
+      <span>組別：<strong id="lbl-group">—</strong></span>
+    </div>
+  </div>
+
+  <!-- Group selector -->
+  <div id="group-bar">
+    <label>選擇組別：</label>
+    <select id="group-select" onchange="onGroupChange()">
+      <option value="group1">GROUP1</option>
+      <option value="group3">GROUP3</option>
+      <option value="group6">GROUP6</option>
+      <option value="all">ALL</option>
+    </select>
+  </div>
+
+  <!-- Group chart + overlay -->
+  <p class="hint">在圖上拖曳三條標記線以標記時間點（橘／藍／紅）</p>
+  <div class="chart-wrap" id="chart-wrap"
+       onmousedown="onDown(event)"
+       onmousemove="onMove(event)"
+       onmouseup="onUp()"
+       onmouseleave="onUp()"
+       ontouchstart="onDown(event,true)"
+       ontouchmove="onMove(event,true)"
+       ontouchend="onUp()">
+    <img id="img-group" src="" alt="組別圖" onload="redraw()">
+    <canvas id="overlay"></canvas>
+  </div>
+
+  <!-- Summary comparison (static) -->
+  <img id="img-summary" src="" alt="全組比較圖">
+
+  <!-- Time point values -->
+  <div id="timepoints-section">
+    <div class="tp-row">
+      <span class="tp-label">時間點 1</span>
+      <div class="tp-bar-wrap"><div class="tp-bar" id="bar1" style="width:0%"></div></div>
+      <span class="tp-time" id="tv1">— min</span>
+    </div>
+    <div class="tp-row">
+      <span class="tp-label">時間點 2</span>
+      <div class="tp-bar-wrap"><div class="tp-bar" id="bar2" style="width:0%"></div></div>
+      <span class="tp-time" id="tv2">— min</span>
+    </div>
+    <div class="tp-row">
+      <span class="tp-label">時間點 3</span>
+      <div class="tp-bar-wrap"><div class="tp-bar" id="bar3" style="width:0%"></div></div>
+      <span class="tp-time" id="tv3">— min</span>
+    </div>
+  </div>
+
+  <button id="save-btn" onclick="handleSave()">儲存</button>
+  <div id="status"></div>
+
+</div>
+<script>
+// ── Config ───────────────────────────────────────────────────
+const APPS_SCRIPT_URL = 'YOUR_APPS_SCRIPT_URL_HERE';
+const IMG_BASE  = 'images/';
+const TIME_MAX  = 125; // 分鐘
+
+// 圖中時間軸在整張圖的左右比例（依實際圖片調整）
+// 從左邊 Y 軸結束處 到 右邊結束處，以圖片寬度的比例表示
+const CHART_LEFT_RATIO  = 0.055;  // ~5.5%
+const CHART_RIGHT_RATIO = 0.987;  // ~98.7%
+
+// 三條標記線的顏色
+const LINE_COLORS = ['#e65100', '#1565c0', '#b71c1c'];
+const LINE_LABELS = ['T1', 'T2', 'T3'];
+// ────────────────────────────────────────────────────────────
+
+const params = new URLSearchParams(window.location.search);
+const date   = params.get('date')  || '';
+const initGroup = (params.get('group') || 'group1').toLowerCase();
+
+document.getElementById('lbl-date').textContent  = date  || '未知';
+document.getElementById('lbl-group').textContent = (params.get('group') || '未知').toUpperCase();
+
+// Set dropdown to URL group
+const sel = document.getElementById('group-select');
+for (let opt of sel.options) {
+  if (opt.value === initGroup) { opt.selected = true; break; }
+}
+
+function loadImages(group) {
+  document.getElementById('img-group').src   = `${IMG_BASE}${date}_${group}.png`;
+  document.getElementById('img-summary').src = `${IMG_BASE}${date}_summary_comparison.png`;
+}
+loadImages(initGroup);
+
+function onGroupChange() {
+  loadImages(sel.value);
+}
+
+// ── Canvas overlay ───────────────────────────────────────────
+const canvas  = document.getElementById('overlay');
+const ctx     = canvas.getContext('2d');
+const wrap    = document.getElementById('chart-wrap');
+
+// Line positions as ratio of chart area (0 = left, 1 = right)
+// Default: evenly spread
+let lineRatios = [0.2, 0.5, 0.8];
+let dragging   = -1; // index of line being dragged
+
+function ratioToMinutes(r) {
+  return Math.round(r * TIME_MAX);
+}
+
+// Convert mouse X (relative to wrap) → chart ratio
+function xToRatio(clientX) {
+  const rect = wrap.getBoundingClientRect();
+  const relX = clientX - rect.left;
+  const chartLeft  = rect.width * CHART_LEFT_RATIO;
+  const chartRight = rect.width * CHART_RIGHT_RATIO;
+  let r = (relX - chartLeft) / (chartRight - chartLeft);
+  return Math.max(0, Math.min(1, r));
+}
+
+// Find nearest line within threshold
+function nearestLine(clientX) {
+  const rect = wrap.getBoundingClientRect();
+  const chartLeft  = rect.width * CHART_LEFT_RATIO;
+  const chartRight = rect.width * CHART_RIGHT_RATIO;
+  const threshold  = 12; // px
+  let best = -1, bestDist = Infinity;
+  lineRatios.forEach((r, i) => {
+    const lx = chartLeft + r * (chartRight - chartLeft);
+    const dist = Math.abs((clientX - rect.left) - lx);
+    if (dist < threshold && dist < bestDist) { best = i; bestDist = dist; }
+  });
+  return best;
+}
+
+function redraw() {
+  const img = document.getElementById('img-group');
+  canvas.width  = img.offsetWidth;
+  canvas.height = img.offsetHeight;
+
+  const chartLeft  = canvas.width  * CHART_LEFT_RATIO;
+  const chartRight = canvas.width  * CHART_RIGHT_RATIO;
+  const top    = canvas.height * 0.04;
+  const bottom = canvas.height * 0.82;
+
+  lineRatios.forEach((r, i) => {
+    const x = chartLeft + r * (chartRight - chartLeft);
+    ctx.save();
+    ctx.strokeStyle = LINE_COLORS[i];
+    ctx.lineWidth   = 2.5;
+    ctx.setLineDash([6, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, bottom);
+    ctx.stroke();
+
+    // Label bubble
+    ctx.fillStyle = LINE_COLORS[i];
+    ctx.fillRect(x - 14, top - 18, 28, 16);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 11px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(LINE_LABELS[i], x, top - 5);
+    ctx.restore();
+  });
+
+  updateDisplay();
+}
+
+function updateDisplay() {
+  lineRatios.forEach((r, i) => {
+    const mins = ratioToMinutes(r);
+    document.getElementById(`tv${i+1}`).textContent = `${mins} min`;
+    document.getElementById(`bar${i+1}`).style.width = `${r * 100}%`;
+  });
+}
+
+function getClientX(e, touch) {
+  return touch ? e.touches[0].clientX : e.clientX;
+}
+
+function onDown(e, touch = false) {
+  const cx = getClientX(e, touch);
+  dragging = nearestLine(cx);
+  if (dragging !== -1 && touch) e.preventDefault();
+}
+
+function onMove(e, touch = false) {
+  if (dragging === -1) return;
+  if (touch) e.preventDefault();
+  lineRatios[dragging] = xToRatio(getClientX(e, touch));
+  redraw();
+}
+
+function onUp() { dragging = -1; }
+
+window.addEventListener('resize', redraw);
+
+// Initial draw after images load
+document.getElementById('img-group').addEventListener('load', redraw);
+setTimeout(redraw, 300);
+
+// ── Save ─────────────────────────────────────────────────────
+async function handleSave() {
+  const btn    = document.getElementById('save-btn');
+  const status = document.getElementById('status');
+  btn.disabled = true;
+  status.className = '';
+  status.textContent = '截圖中，請稍候…';
+
+  try {
+    const c = await html2canvas(document.getElementById('page-wrapper'), {
+      useCORS: true, scale: 1.5
+    });
+    const screenshot = c.toDataURL('image/png').split(',')[1];
+
+    const payload = {
+      date, group: sel.value,
+      timepoints: lineRatios.map(ratioToMinutes),
+      screenshot,
+      timestamp: new Date().toISOString()
+    };
+
+    status.textContent = '上傳中…';
+    const res  = await fetch(APPS_SCRIPT_URL, { method: 'POST', body: JSON.stringify(payload) });
+    const text = await res.text();
+
+    if (text === 'OK') {
+      status.className = 'ok';
+      status.textContent = '儲存成功！';
+    } else {
+      throw new Error(text);
+    }
+  } catch (err) {
+    status.className = 'err';
+    status.textContent = `儲存失敗：${err.message}`;
+    btn.disabled = false;
+  }
+}
+</script>
+</body>
+</html>
