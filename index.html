@@ -109,7 +109,7 @@
       transition: width 0.15s;
     }
     .tp-time {
-      width: 68px;
+      width: 110px;
       text-align: right;
       font-size: 13px;
       font-weight: bold;
@@ -179,19 +179,19 @@
   <!-- Time point values -->
   <div id="timepoints-section">
     <div class="tp-row">
-      <span class="tp-label">時間點 1</span>
-      <div class="tp-bar-wrap"><div class="tp-bar" id="bar1" style="width:0%"></div></div>
-      <span class="tp-time" id="tv1">— min</span>
+      <span class="tp-label">時間段 1</span>
+      <div class="tp-bar-wrap"><div class="tp-bar" id="bar1" style="width:0%;margin-left:0%"></div></div>
+      <span class="tp-time" id="tv1">— ~ — min</span>
     </div>
     <div class="tp-row">
-      <span class="tp-label">時間點 2</span>
-      <div class="tp-bar-wrap"><div class="tp-bar" id="bar2" style="width:0%"></div></div>
-      <span class="tp-time" id="tv2">— min</span>
+      <span class="tp-label">時間段 2</span>
+      <div class="tp-bar-wrap"><div class="tp-bar" id="bar2" style="width:0%;margin-left:0%"></div></div>
+      <span class="tp-time" id="tv2">— ~ — min</span>
     </div>
     <div class="tp-row">
-      <span class="tp-label">時間點 3</span>
-      <div class="tp-bar-wrap"><div class="tp-bar" id="bar3" style="width:0%"></div></div>
-      <span class="tp-time" id="tv3">— min</span>
+      <span class="tp-label">時間段 3</span>
+      <div class="tp-bar-wrap"><div class="tp-bar" id="bar3" style="width:0%;margin-left:0%"></div></div>
+      <span class="tp-time" id="tv3">— ~ — min</span>
     </div>
   </div>
 
@@ -274,40 +274,62 @@ updateHeader();
 loadImages();
 
 // ── Canvas overlay ───────────────────────────────────────────
-const canvas  = document.getElementById('overlay');
-const ctx     = canvas.getContext('2d');
-const wrap    = document.getElementById('chart-wrap');
+const canvas = document.getElementById('overlay');
+const ctx    = canvas.getContext('2d');
+const wrap   = document.getElementById('chart-wrap');
 
-// Line positions as ratio of chart area (0 = left, 1 = right)
-// Default: evenly spread
-let lineRatios = [0.2, 0.5, 0.8];
-let dragging   = -1; // index of line being dragged
+// 每個時間段有 start 和 end，預設三段平均分布
+let segments = [
+  [0.12, 0.28],
+  [0.40, 0.56],
+  [0.68, 0.84]
+];
+// dragging: { seg: i, handle: 'start'|'end'|'move', anchorR, anchorX }
+let dragging = null;
+
+const SEGMENT_ALPHA = 0.25; // 區塊透明度
 
 function ratioToMinutes(r) {
   return Math.round(r * TIME_MAX);
 }
 
-// Convert mouse X (relative to wrap) → chart ratio
 function xToRatio(clientX) {
+  const rect = wrap.getBoundingClientRect();
+  const chartLeft  = rect.width * CHART_LEFT_RATIO;
+  const chartRight = rect.width * CHART_RIGHT_RATIO;
+  return Math.max(0, Math.min(1,
+    (clientX - rect.left - chartLeft) / (chartRight - chartLeft)
+  ));
+}
+
+function ratioToX(r) {
+  const rect = wrap.getBoundingClientRect();
+  const chartLeft  = rect.width * CHART_LEFT_RATIO;
+  const chartRight = rect.width * CHART_RIGHT_RATIO;
+  return chartLeft + r * (chartRight - chartLeft);
+}
+
+// 找最近的控制點（start 或 end 邊緣）或整段拖曳
+function findHandle(clientX) {
   const rect = wrap.getBoundingClientRect();
   const relX = clientX - rect.left;
   const chartLeft  = rect.width * CHART_LEFT_RATIO;
   const chartRight = rect.width * CHART_RIGHT_RATIO;
-  let r = (relX - chartLeft) / (chartRight - chartLeft);
-  return Math.max(0, Math.min(1, r));
-}
+  const threshold  = 14;
 
-// Find nearest line within threshold
-function nearestLine(clientX) {
-  const rect = wrap.getBoundingClientRect();
-  const chartLeft  = rect.width * CHART_LEFT_RATIO;
-  const chartRight = rect.width * CHART_RIGHT_RATIO;
-  const threshold  = 12; // px
-  let best = -1, bestDist = Infinity;
-  lineRatios.forEach((r, i) => {
-    const lx = chartLeft + r * (chartRight - chartLeft);
-    const dist = Math.abs((clientX - rect.left) - lx);
-    if (dist < threshold && dist < bestDist) { best = i; bestDist = dist; }
+  let best = null, bestDist = Infinity;
+  segments.forEach(([s, e], i) => {
+    const sx = chartLeft + s * (chartRight - chartLeft);
+    const ex = chartLeft + e * (chartRight - chartLeft);
+    const ds = Math.abs(relX - sx);
+    const de = Math.abs(relX - ex);
+    if (ds < threshold && ds < bestDist) { best = { seg: i, handle: 'start' }; bestDist = ds; }
+    if (de < threshold && de < bestDist) { best = { seg: i, handle: 'end'   }; bestDist = de; }
+    // 整段拖曳（在區塊內部）
+    if (relX > sx + threshold && relX < ex - threshold && bestDist > threshold) {
+      const dm = Math.min(ds, de) + 1;
+      if (dm < bestDist) { best = { seg: i, handle: 'move', anchorR: xToRatio(clientX), anchorS: s, anchorE: e }; bestDist = dm; }
+    }
   });
   return best;
 }
@@ -317,29 +339,44 @@ function redraw() {
   canvas.width  = img.offsetWidth;
   canvas.height = img.offsetHeight;
 
-  const chartLeft  = canvas.width  * CHART_LEFT_RATIO;
-  const chartRight = canvas.width  * CHART_RIGHT_RATIO;
+  const chartLeft  = canvas.width * CHART_LEFT_RATIO;
+  const chartRight = canvas.width * CHART_RIGHT_RATIO;
   const top    = canvas.height * 0.06;
   const bottom = canvas.height * 0.82;
 
-  lineRatios.forEach((r, i) => {
-    const x = chartLeft + r * (chartRight - chartLeft);
+  segments.forEach(([s, e], i) => {
+    const x1 = chartLeft + s * (chartRight - chartLeft);
+    const x2 = chartLeft + e * (chartRight - chartLeft);
+    const w  = x2 - x1;
+    const color = LINE_COLORS[i];
+
     ctx.save();
-    ctx.strokeStyle = LINE_COLORS[i];
+
+    // 半透明填色區塊
+    ctx.globalAlpha = SEGMENT_ALPHA;
+    ctx.fillStyle   = color;
+    ctx.fillRect(x1, top, w, bottom - top);
+    ctx.globalAlpha = 1;
+
+    // 左邊界線
+    ctx.strokeStyle = color;
     ctx.lineWidth   = 2.5;
     ctx.setLineDash([6, 3]);
-    ctx.beginPath();
-    ctx.moveTo(x, top);
-    ctx.lineTo(x, bottom);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x1, top); ctx.lineTo(x1, bottom); ctx.stroke();
 
-    // Label bubble
-    ctx.fillStyle = LINE_COLORS[i];
-    ctx.fillRect(x - 14, top - 18, 28, 16);
+    // 右邊界線
+    ctx.beginPath(); ctx.moveTo(x2, top); ctx.lineTo(x2, bottom); ctx.stroke();
+
+    // 標籤泡泡（置中）
+    const midX = (x1 + x2) / 2;
+    ctx.setLineDash([]);
+    ctx.fillStyle = color;
+    ctx.fillRect(midX - 16, top - 20, 32, 18);
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 11px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText(LINE_LABELS[i], x, top - 5);
+    ctx.fillText(LINE_LABELS[i], midX, top - 6);
+
     ctx.restore();
   });
 
@@ -347,10 +384,13 @@ function redraw() {
 }
 
 function updateDisplay() {
-  lineRatios.forEach((r, i) => {
-    const mins = ratioToMinutes(r);
-    document.getElementById(`tv${i+1}`).textContent = `${mins} min`;
-    document.getElementById(`bar${i+1}`).style.width = `${r * 100}%`;
+  segments.forEach(([s, e], i) => {
+    const sm = ratioToMinutes(s);
+    const em = ratioToMinutes(e);
+    const pct = e - s;
+    document.getElementById(`tv${i+1}`).textContent = `${sm} ~ ${em} min`;
+    document.getElementById(`bar${i+1}`).style.marginLeft = `${s * 100}%`;
+    document.getElementById(`bar${i+1}`).style.width      = `${pct * 100}%`;
   });
 }
 
@@ -360,22 +400,35 @@ function getClientX(e, touch) {
 
 function onDown(e, touch = false) {
   const cx = getClientX(e, touch);
-  dragging = nearestLine(cx);
-  if (dragging !== -1 && touch) e.preventDefault();
+  dragging = findHandle(cx);
+  if (dragging && touch) e.preventDefault();
 }
 
 function onMove(e, touch = false) {
-  if (dragging === -1) return;
+  if (!dragging) return;
   if (touch) e.preventDefault();
-  lineRatios[dragging] = xToRatio(getClientX(e, touch));
+  const r = xToRatio(getClientX(e, touch));
+  const { seg, handle } = dragging;
+
+  if (handle === 'start') {
+    segments[seg][0] = Math.min(r, segments[seg][1] - 0.01);
+  } else if (handle === 'end') {
+    segments[seg][1] = Math.max(r, segments[seg][0] + 0.01);
+  } else if (handle === 'move') {
+    const dr = r - dragging.anchorR;
+    const w  = dragging.anchorE - dragging.anchorS;
+    let ns = dragging.anchorS + dr;
+    let ne = dragging.anchorE + dr;
+    if (ns < 0) { ns = 0; ne = w; }
+    if (ne > 1) { ne = 1; ns = 1 - w; }
+    segments[seg] = [ns, ne];
+  }
   redraw();
 }
 
-function onUp() { dragging = -1; }
+function onUp() { dragging = null; }
 
 window.addEventListener('resize', redraw);
-
-// Initial draw after images load
 document.getElementById('img-group').addEventListener('load', redraw);
 setTimeout(redraw, 300);
 
@@ -395,7 +448,9 @@ async function handleSave() {
 
     const payload = {
       date: currentDate(), group: currentGroup(),
-      timepoints: lineRatios.map(ratioToMinutes),
+      timepoints: segments.map(([s, e]) => ({
+        start: ratioToMinutes(s), end: ratioToMinutes(e)
+      })),
       screenshot,
       timestamp: new Date().toISOString()
     };
